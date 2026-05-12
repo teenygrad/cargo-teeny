@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// Cargo integration for the teeny compiler (`cargo teeny …`).
 #[derive(Parser)]
@@ -21,6 +21,13 @@ pub enum Command {
     Sysroot(SysrootArgs),
 }
 
+/// Board or environment profile for the sysroot layout and metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+pub enum SysrootType {
+    JetsonOrinNano,
+}
+
 #[derive(Parser)]
 pub struct SysrootArgs {
     /// Host or target triple this sysroot is for (e.g. `aarch64-unknown-linux-gnu`).
@@ -30,4 +37,8 @@ pub struct SysrootArgs {
     /// Root directory for the sysroot (created if it does not exist).
     #[arg(long)]
     pub path: PathBuf,
+
+    /// Sysroot profile (fixed set; controls layout and marker metadata).
+    #[arg(long = "type", value_enum)]
+    pub sysroot_type: SysrootType,
 }

@@ -4,11 +4,19 @@ use std::fs;
 use std::io::Write;
 
 use anyhow::{Context, Result};
+use clap::ValueEnum;
 
-use crate::cli::SysrootArgs;
+use crate::cli::{SysrootArgs, SysrootType};
 
 const MARKER: &str = ".cargo-teeny-sysroot";
-const MARKER_VERSION: u32 = 2;
+const MARKER_VERSION: u32 = 3;
+
+fn sysroot_type_cli_name(t: SysrootType) -> String {
+    t.to_possible_value()
+        .expect("SysrootType maps to a clap PossibleValue")
+        .get_name()
+        .to_owned()
+}
 
 /// Standard directories created under the sysroot root (before host-specific paths).
 const SYSROOT_DIRS: &[&str] = &[
@@ -49,7 +57,11 @@ pub fn run(args: SysrootArgs) -> Result<()> {
         .with_context(|| format!("create {}", host_lib_dir.display()))?;
 
     let marker_path = root.join(MARKER);
-    let marker_body = format!("{MARKER_VERSION}\nHOST={}\n", args.host);
+    let type_str = sysroot_type_cli_name(args.sysroot_type);
+    let marker_body = format!(
+        "{MARKER_VERSION}\nHOST={}\nTYPE={type_str}\n",
+        args.host
+    );
     let mut marker = fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -61,7 +73,7 @@ pub fn run(args: SysrootArgs) -> Result<()> {
         .with_context(|| format!("write contents of {}", marker_path.display()))?;
 
     eprintln!(
-        "sysroot scaffold at {} (host {})\n\
+        "sysroot scaffold at {} (host {}, type {type_str})\n\
          base directories: {}\n\
          host lib directory: {}",
         root.display(),
@@ -77,7 +89,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
-    use crate::cli::SysrootArgs;
+    use crate::cli::{SysrootArgs, SysrootType};
 
     #[test]
     fn creates_expected_tree() {
@@ -91,6 +103,7 @@ mod tests {
         run(SysrootArgs {
             host: host.into(),
             path: tmp.clone(),
+            sysroot_type: SysrootType::JetsonOrinNano,
         })
         .unwrap();
         for rel in SYSROOT_DIRS {
@@ -100,6 +113,7 @@ mod tests {
         assert!(tmp.join(MARKER).is_file());
         let marker = fs::read_to_string(tmp.join(MARKER)).unwrap();
         assert!(marker.contains("HOST=aarch64-unknown-linux-gnu"));
+        assert!(marker.contains("TYPE=jetson-orin-nano"));
         let _ = fs::remove_dir_all(&tmp);
     }
 }
