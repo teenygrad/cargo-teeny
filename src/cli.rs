@@ -4,12 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 /// Cargo integration for the teeny compiler (`cargo teeny …`).
 #[derive(Parser)]
-#[command(
-    name = "cargo-teeny",
-    version,
-    about,
-    disable_help_subcommand = true,
-)]
+#[command(name = "cargo-teeny", version, about, disable_help_subcommand = true)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -41,4 +36,13 @@ pub struct SysrootArgs {
     /// Sysroot profile (fixed set; controls layout and marker metadata).
     #[arg(long = "type", value_enum)]
     pub sysroot_type: SysrootType,
+
+    /// When set (e.g. `ubuntu@jetson`), run `rsync` over SSH after scaffolding; remote paths
+    /// depend on `--type` (see `sysroot_rsync_folders` in `commands/sysroot.rs`).
+    #[arg(long)]
+    pub rsync_from: Option<String>,
+
+    /// Remote shell passed to `rsync -e` (e.g. `ssh` or `ssh -p 2222`).
+    #[arg(long = "rsync-ssh", default_value = "ssh")]
+    pub rsync_ssh: String,
 }
