@@ -23,6 +23,11 @@ pub enum Command {
 
 #[derive(Parser)]
 pub struct SysrootArgs {
+    /// Host or target triple this sysroot is for (e.g. `aarch64-unknown-linux-gnu`).
+    #[arg(long)]
+    pub host: String,
+
     /// Root directory for the sysroot (created if it does not exist).
+    #[arg(long)]
     pub path: PathBuf,
 }
