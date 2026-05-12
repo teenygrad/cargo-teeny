@@ -1,0 +1,16 @@
+[package]
+name = "cargo-teeny"
+version = "0.1.0"
+edition = "2024"
+description = "Cargo commands for the teeny cross-compiler toolchain"
+license-file = "LICENSE"
+repository = "https://github.com/spinorml/cargo-teeny"
+readme = "README.md"
+
+[[bin]]
+name = "cargo-teeny"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
