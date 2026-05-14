@@ -8,7 +8,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 
-use crate::cli::{SysrootArgs, SysrootType};
+use crate::cli::{BoardType, SysrootArgs};
 
 const MARKER: &str = ".cargo-teeny-sysroot";
 const MARKER_VERSION: u32 = 5;
@@ -23,9 +23,9 @@ pub struct SysrootRsyncFolder {
 /// Directories to `rsync` from a donor machine into the sysroot for the given profile.
 ///
 /// Each `remote_path` is mirrored under `sysroot_root` at `sysroot_root/<path-without-leading-slash>`.
-pub fn sysroot_rsync_folders(kind: SysrootType) -> &'static [SysrootRsyncFolder] {
+pub fn sysroot_rsync_folders(kind: BoardType) -> &'static [SysrootRsyncFolder] {
     match kind {
-        SysrootType::JetsonOrinNano => &[
+        BoardType::JetsonOrinNano => &[
             SysrootRsyncFolder {
                 remote_path: "/usr/local/cuda/include",
             },
@@ -39,21 +39,15 @@ pub fn sysroot_rsync_folders(kind: SysrootType) -> &'static [SysrootRsyncFolder]
     }
 }
 
-fn sysroot_type_cli_name(t: SysrootType) -> String {
+fn sysroot_type_cli_name(t: BoardType) -> String {
     t.to_possible_value()
-        .expect("SysrootType maps to a clap PossibleValue")
+        .expect("BoardType maps to a clap PossibleValue")
         .get_name()
         .to_owned()
 }
 
 /// Standard directories created under the sysroot root (before host-specific paths).
-const SYSROOT_DIRS: &[&str] = &[
-    "usr/include",
-    "usr/lib",
-    "lib",
-    "bin",
-    "etc",
-];
+const SYSROOT_DIRS: &[&str] = &["usr/include", "usr/lib", "lib", "bin", "etc"];
 
 fn validate_host(host: &str) -> Result<()> {
     anyhow::ensure!(!host.is_empty(), "--host must not be empty");
@@ -69,10 +63,7 @@ fn validate_remote_abs_path(label: &str, path: &str) -> Result<()> {
         path.starts_with('/'),
         "{label} must be an absolute Unix path (got {path:?})"
     );
-    anyhow::ensure!(
-        !path.contains('\0'),
-        "{label} must not contain NUL bytes"
-    );
+    anyhow::ensure!(!path.contains('\0'), "{label} must not contain NUL bytes");
     Ok(())
 }
 
@@ -102,8 +93,7 @@ fn rsync_remote_dir(
     local_dest: &Path,
 ) -> Result<()> {
     validate_remote_abs_path("remote rsync path", remote_abs)?;
-    fs::create_dir_all(local_dest)
-        .with_context(|| format!("create {}", local_dest.display()))?;
+    fs::create_dir_all(local_dest).with_context(|| format!("create {}", local_dest.display()))?;
 
     let src = format!("{peer}:{remote_abs}/");
     let dest = format!("{}/", local_dest.display());
@@ -156,8 +146,7 @@ pub fn run(args: SysrootArgs) -> Result<()> {
 
     for rel in SYSROOT_DIRS {
         let dir = root.join(rel);
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("create {}", dir.display()))?;
+        fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
     }
 
     let host_lib = format!("usr/lib/{}", args.host);
@@ -166,10 +155,7 @@ pub fn run(args: SysrootArgs) -> Result<()> {
         .with_context(|| format!("create {}", host_lib_dir.display()))?;
 
     let type_str = sysroot_type_cli_name(args.sysroot_type);
-    let mut marker_body = format!(
-        "{MARKER_VERSION}\nHOST={}\nTYPE={type_str}\n",
-        args.host
-    );
+    let mut marker_body = format!("{MARKER_VERSION}\nHOST={}\nTYPE={type_str}\n", args.host);
 
     if let Some(peer) = args.rsync_from.as_ref() {
         marker_body.push_str(&format!("RSYNC_FROM={peer}\n"));
@@ -219,11 +205,11 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
-    use crate::cli::{SysrootArgs, SysrootType};
+    use crate::cli::{BoardType, SysrootArgs};
 
     #[test]
     fn jetson_orin_nano_rsync_folders() {
-        let folders = sysroot_rsync_folders(SysrootType::JetsonOrinNano);
+        let folders = sysroot_rsync_folders(BoardType::JetsonOrinNano);
         let paths: Vec<_> = folders.iter().map(|f| f.remote_path).collect();
         assert_eq!(
             paths,
@@ -247,7 +233,7 @@ mod tests {
         run(SysrootArgs {
             host: host.into(),
             path: tmp.clone(),
-            sysroot_type: SysrootType::JetsonOrinNano,
+            sysroot_type: BoardType::JetsonOrinNano,
             rsync_from: None,
             rsync_ssh: "ssh".into(),
         })
