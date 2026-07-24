@@ -2,6 +2,32 @@
 
 Guidance for AI agents working in this Rust repository.
 
+## Issue Tracking with br (beads_rust)
+
+This project uses **br** (beads_rust) for issue tracking. `.beads/` (symlinked to `../beads/cargo-teeny/.beads`) is authoritative.
+
+**Note:** `br` is non-invasive and never executes git commands. After `br sync --flush-only`, you must manually run `git add .beads/ && git commit`.
+
+### Agent workflow
+
+```bash
+br ready                              # Find available work
+br show <id>                          # View issue details
+br update <id> --status in_progress   # Claim work
+br create ...                         # File a new issue
+br close <id>                         # Complete work
+```
+
+### Sync and commit
+
+`br` writes to a local SQLite DB; nothing is committed automatically. After creating/updating/closing issues, sync to JSONL and commit from inside `beads/cargo-teeny/`:
+
+```bash
+br sync --flush-only
+git add .beads/
+git commit -m "sync beads"
+```
+
 ## Error Handling
 
 Use `anyhow::Result` for fallible functions. Chain context with `.with_context(|| ...)` (closure form, not `.context(...)`) so the message is only allocated on failure.
