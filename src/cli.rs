@@ -20,6 +20,8 @@ pub enum Command {
     Check(BuildArgs),
     /// Lint the current crate via `cross clippy`.
     Clippy(BuildArgs),
+    /// Install the custom teenyc rustup toolchain from the spinorml CDN.
+    InstallToolchain(InstallToolchainArgs),
 }
 
 /// Board or environment profile shared by sysroot and build commands.
@@ -78,4 +80,37 @@ pub struct BuildArgs {
     /// Extra arguments forwarded verbatim to `cross` after `--`.
     #[arg(last = true)]
     pub extra: Vec<String>,
+}
+
+#[derive(Parser)]
+pub struct InstallToolchainArgs {
+    /// Custom rustup distribution server hosting the channel manifest
+    /// (`<dist-server>/dist/channel-rust-<channel>.toml`).
+    #[arg(long, default_value = "https://cdn.spinorml.com/teenyc")]
+    pub dist_server: String,
+
+    /// Channel name (selects which `channel-rust-<channel>.toml` manifest to fetch).
+    #[arg(long, default_value = "teenyc")]
+    pub channel: String,
+
+    /// Package within that manifest to install (the compiler-only package, no std/cargo).
+    #[arg(long, default_value = "teenyc")]
+    pub package: String,
+
+    /// Name to register the toolchain under with `rustup toolchain link` (defaults to
+    /// `--package`). `rustup toolchain install` can't be used for a custom channel name — it
+    /// only accepts stable/beta/nightly or a bare version number — so this links a locally
+    /// extracted copy instead.
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Local directory to extract the toolchain into (defaults to
+    /// `~/.cargo-teeny/toolchains/<name>`; wiped and replaced on reinstall).
+    #[arg(long)]
+    pub dest: Option<PathBuf>,
+
+    /// Also set the linked toolchain as your rustup default (skipped by default so this
+    /// doesn't silently change what plain `rustc`/`cargo build` use elsewhere).
+    #[arg(long)]
+    pub default: bool,
 }
