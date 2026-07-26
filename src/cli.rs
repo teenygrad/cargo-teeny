@@ -22,6 +22,9 @@ pub enum Command {
     Clippy(BuildArgs),
     /// Install the custom teenyc rustup toolchain from the spinorml CDN.
     InstallToolchain(InstallToolchainArgs),
+    /// Build a binary/example for the host and run it to ahead-of-time compile
+    /// kernels for a given device/config (`--device`/`--options`).
+    Aot(AotArgs),
 }
 
 /// Board or environment profile shared by sysroot and build commands.
@@ -113,4 +116,36 @@ pub struct InstallToolchainArgs {
     /// doesn't silently change what plain `rustc`/`cargo build` use elsewhere).
     #[arg(long)]
     pub default: bool,
+}
+
+#[derive(Parser)]
+pub struct AotArgs {
+    /// Binary target to build and run (mutually exclusive with `--example`).
+    #[arg(long)]
+    pub bin: Option<String>,
+
+    /// Example target to build and run (mutually exclusive with `--bin`).
+    #[arg(long, conflicts_with = "bin")]
+    pub example: Option<String>,
+
+    /// Build in debug mode (omits `--release`; default is release).
+    #[arg(long)]
+    pub no_release: bool,
+
+    /// Target backend to compile for. Forwarded verbatim to the binary —
+    /// cargo-teeny never parses this itself.
+    #[arg(long)]
+    pub device: String,
+
+    /// Backend-specific compiler options. Forwarded verbatim to the binary.
+    #[arg(long)]
+    pub options: Option<String>,
+
+    /// Cache directory. Forwarded verbatim to the binary.
+    #[arg(long)]
+    pub cache_dir: Option<PathBuf>,
+
+    /// Recompile even if a cached artifact already exists. Forwarded verbatim to the binary.
+    #[arg(long)]
+    pub force: bool,
 }
