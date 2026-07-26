@@ -29,6 +29,8 @@ pub enum Command {
     /// for a board: cross-compiles the binary/example and AOT-compiles its
     /// kernels for the given device/config into the same tree.
     Package(PackageArgs),
+    /// Push a package directory (from `package`) to a remote host over rsync/ssh.
+    Deploy(DeployArgs),
 }
 
 /// Board or environment profile shared by sysroot and build commands.
@@ -198,4 +200,29 @@ pub struct PackageArgs {
     /// Recompile kernels even if a cached artifact already exists.
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(Parser)]
+pub struct DeployArgs {
+    /// Local package directory to deploy (output of `cargo teeny package --dest ...`).
+    #[arg(long)]
+    pub package: PathBuf,
+
+    /// Destination directory on the remote host (created by rsync if missing;
+    /// its parent must already exist).
+    #[arg(long)]
+    pub dest: String,
+
+    /// SSH target: `user@host` or just `host` (uses your local user / ssh config default).
+    #[arg(long)]
+    pub host: String,
+
+    /// Remote shell passed to `rsync -e` (e.g. `ssh` or `ssh -p 2222`).
+    #[arg(long, default_value = "ssh")]
+    pub ssh: String,
+
+    /// Overwrite files that already exist on the remote (default: leave them
+    /// untouched and only copy files that aren't there yet).
+    #[arg(long)]
+    pub overwrite: bool,
 }

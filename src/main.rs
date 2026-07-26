@@ -27,5 +27,6 @@ fn main() -> Result<()> {
         cli::Command::InstallToolchain(args) => commands::install_toolchain::run(args),
         cli::Command::Aot(args) => commands::aot::run(args),
         cli::Command::Package(args) => commands::package::run(args),
+        cli::Command::Deploy(args) => commands::deploy::run(args),
     }
 }
