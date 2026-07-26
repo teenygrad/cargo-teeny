@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use clap::ValueEnum;
 
 use crate::cli::{BoardType, SysrootArgs};
+use crate::profiles::board_type_cli_name;
 
 const MARKER: &str = ".cargo-teeny-sysroot";
 const MARKER_VERSION: u32 = 5;
@@ -37,13 +37,6 @@ pub fn sysroot_rsync_folders(kind: BoardType) -> &'static [SysrootRsyncFolder] {
             },
         ],
     }
-}
-
-fn sysroot_type_cli_name(t: BoardType) -> String {
-    t.to_possible_value()
-        .expect("BoardType maps to a clap PossibleValue")
-        .get_name()
-        .to_owned()
 }
 
 /// Standard directories created under the sysroot root (before host-specific paths).
@@ -154,7 +147,7 @@ pub fn run(args: SysrootArgs) -> Result<()> {
     fs::create_dir_all(&host_lib_dir)
         .with_context(|| format!("create {}", host_lib_dir.display()))?;
 
-    let type_str = sysroot_type_cli_name(args.sysroot_type);
+    let type_str = board_type_cli_name(args.sysroot_type);
     let mut marker_body = format!("{MARKER_VERSION}\nHOST={}\nTYPE={type_str}\n", args.host);
 
     if let Some(peer) = args.rsync_from.as_ref() {

@@ -26,5 +26,6 @@ fn main() -> Result<()> {
         cli::Command::Clippy(args) => commands::build::run(args, CrossVerb::Clippy),
         cli::Command::InstallToolchain(args) => commands::install_toolchain::run(args),
         cli::Command::Aot(args) => commands::aot::run(args),
+        cli::Command::Package(args) => commands::package::run(args),
     }
 }

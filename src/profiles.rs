@@ -1,4 +1,16 @@
+use clap::ValueEnum;
+
 use crate::cli::BoardType;
+
+/// The kebab-case CLI name for a board (e.g. `jetson-orin-nano`), as used in
+/// `--target`/`--type` and recorded in marker files.
+pub fn board_type_cli_name(board: BoardType) -> String {
+    board
+        .to_possible_value()
+        .expect("BoardType maps to a clap PossibleValue")
+        .get_name()
+        .to_owned()
+}
 
 pub struct BoardProfile {
     /// Rust/cross target triple (e.g. `aarch64-unknown-linux-gnu`).

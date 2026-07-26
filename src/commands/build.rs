@@ -60,6 +60,8 @@ pub fn run(args: BuildArgs, verb: CrossVerb) -> Result<()> {
         cmd.arg("--examples");
     } else if let Some(ref name) = args.example {
         cmd.args(["--example", name]);
+    } else if let Some(ref name) = args.bin {
+        cmd.args(["--bin", name]);
     }
 
     if !args.extra.is_empty() {

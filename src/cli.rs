@@ -25,6 +25,10 @@ pub enum Command {
     /// Build a binary/example for the host and run it to ahead-of-time compile
     /// kernels for a given device/config (`--device`/`--options`).
     Aot(AotArgs),
+    /// Assemble a self-contained deployment package (bin/, cache/, conf/, data/)
+    /// for a board: cross-compiles the binary/example and AOT-compiles its
+    /// kernels for the given device/config into the same tree.
+    Package(PackageArgs),
 }
 
 /// Board or environment profile shared by sysroot and build commands.
@@ -79,6 +83,10 @@ pub struct BuildArgs {
     /// Build a specific example by name.
     #[arg(long, conflicts_with = "examples")]
     pub example: Option<String>,
+
+    /// Build a specific binary by name (mutually exclusive with `--example`/`--examples`).
+    #[arg(long, conflicts_with_all = ["examples", "example"])]
+    pub bin: Option<String>,
 
     /// Extra arguments forwarded verbatim to `cross` after `--`.
     #[arg(last = true)]
@@ -146,6 +154,48 @@ pub struct AotArgs {
     pub cache_dir: Option<PathBuf>,
 
     /// Recompile even if a cached artifact already exists. Forwarded verbatim to the binary.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Parser)]
+pub struct PackageArgs {
+    /// Board profile — controls the Rust/cross target triple and default volume mounts.
+    #[arg(long, value_enum)]
+    pub target: BoardType,
+
+    /// Destination directory for the self-contained package (created if missing).
+    /// Populated with bin/, cache/, conf/, data/ subdirectories.
+    #[arg(long)]
+    pub dest: PathBuf,
+
+    /// Binary target to build and package (mutually exclusive with `--example`).
+    #[arg(long)]
+    pub bin: Option<String>,
+
+    /// Example target to build and package (mutually exclusive with `--bin`).
+    #[arg(long, conflicts_with = "bin")]
+    pub example: Option<String>,
+
+    /// Build in debug mode (omits `--release`; default is release).
+    #[arg(long)]
+    pub no_release: bool,
+
+    /// Host path to the CUDA aarch64 target directory (overrides the profile default).
+    #[arg(long)]
+    pub cuda_path: Option<PathBuf>,
+
+    /// Target backend to AOT-compile kernels for (e.g. `cuda`). Forwarded verbatim to
+    /// the host-run AOT compile step — cargo-teeny never parses this itself.
+    #[arg(long)]
+    pub device: String,
+
+    /// Backend-specific compiler options (e.g. `"capability=sm_87"` for Jetson Orin
+    /// Nano). Forwarded verbatim.
+    #[arg(long)]
+    pub options: Option<String>,
+
+    /// Recompile kernels even if a cached artifact already exists.
     #[arg(long)]
     pub force: bool,
 }
