@@ -38,9 +38,14 @@ fn validate_dist_server(dist_server: &str) -> Result<()> {
     Ok(())
 }
 
-/// Mirrors the rules `rustup toolchain link` enforces (see `rustup help toolchain`), checked
-/// up front so failures are clear instead of coming from rustup's own error text.
-fn validate_toolchain_name(name: &str) -> Result<()> {
+/// `rustup toolchain link` itself only rejects `none` and path separators — verified empirically,
+/// it happily accepts a name that looks exactly like an official channel (e.g. `stable-teenyc`,
+/// or even `nightly-x86_64-unknown-linux-gnu`). The one real footgun is linking over the name of
+/// a genuine official toolchain you have installed for *this* host via `rustup toolchain install`
+/// (`stable`/`beta`/`nightly`/`stable-<host>`/etc.), which would silently redirect it. `host` is
+/// this machine's real target triple (see `detect_host_triple`), so a name like `stable-teenyc`
+/// — whose suffix isn't a real triple — is never confused with `stable-<host>` and is allowed.
+fn validate_toolchain_name(name: &str, host: &str) -> Result<()> {
     anyhow::ensure!(!name.is_empty(), "toolchain name must not be empty");
     anyhow::ensure!(name != "none", "toolchain name must not be 'none'");
     anyhow::ensure!(
@@ -49,8 +54,9 @@ fn validate_toolchain_name(name: &str) -> Result<()> {
     );
     for channel in ["stable", "beta", "nightly"] {
         anyhow::ensure!(
-            name != channel && !name.starts_with(&format!("{channel}-")),
-            "toolchain name must not look like the standard '{channel}' channel (got {name:?})"
+            name != channel && name != format!("{channel}-{host}"),
+            "toolchain name must not look like your real, official '{channel}' rustup toolchain \
+             for this host (got {name:?}); linking over it would shadow it"
         );
     }
     Ok(())
@@ -105,6 +111,25 @@ fn parse_target(manifest_toml: &str, package: &str, host: &str) -> Result<Packag
         url: url.to_string(),
         sha256: hash.to_string(),
     })
+}
+
+/// Resolves `target.url`'s file inside a local staging directory laid out like
+/// `publish-teenyc-runtime.sh` produces: `<local_dir>/dist/<date>/<basename of url>`. The date
+/// comes from the manifest's own top-level `date` field, so this doesn't depend on `target.url`
+/// being a real, fetchable URL at all (it never is one served locally — it's the CDN URL baked
+/// in at `build-manifest` time).
+fn local_package_path(local_dir: &Path, manifest_toml: &str, url: &str) -> Result<PathBuf> {
+    let doc: toml::Value = manifest_toml
+        .parse()
+        .context("parse channel manifest TOML")?;
+    let date = doc
+        .get("date")
+        .and_then(|v| v.as_str())
+        .context("manifest has no top-level 'date' field")?;
+    let filename = Path::new(url)
+        .file_name()
+        .with_context(|| format!("package url {url:?} has no filename"))?;
+    Ok(local_dir.join("dist").join(date).join(filename))
 }
 
 fn default_dest(name: &str) -> Result<PathBuf> {
@@ -231,18 +256,33 @@ fn find_component_root(extract_dir: &Path) -> Result<PathBuf> {
 pub fn run(args: InstallToolchainArgs) -> Result<()> {
     validate_identifier("--channel", &args.channel)?;
     validate_identifier("--package", &args.package)?;
-    validate_dist_server(&args.dist_server)?;
-    let name = args.name.clone().unwrap_or_else(|| args.package.clone());
-    validate_toolchain_name(&name)?;
-
-    let manifest_url = format!(
-        "{}/dist/channel-rust-{}.toml",
-        args.dist_server, args.channel
-    );
-    eprintln!("cargo-teeny: fetching manifest {manifest_url}");
-    let manifest_toml = fetch_text(&manifest_url)?;
-
     let host = detect_host_triple()?;
+    let name = args
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("{}-{host}", args.channel));
+    validate_toolchain_name(&name, &host)?;
+
+    let manifest_toml = if let Some(local_dir) = &args.local_dir {
+        let manifest_path = local_dir
+            .join("dist")
+            .join(format!("channel-rust-{}.toml", args.channel));
+        eprintln!(
+            "cargo-teeny: reading local manifest {}",
+            manifest_path.display()
+        );
+        fs::read_to_string(&manifest_path)
+            .with_context(|| format!("read {}", manifest_path.display()))?
+    } else {
+        validate_dist_server(&args.dist_server)?;
+        let manifest_url = format!(
+            "{}/dist/channel-rust-{}.toml",
+            args.dist_server, args.channel
+        );
+        eprintln!("cargo-teeny: fetching manifest {manifest_url}");
+        fetch_text(&manifest_url)?
+    };
+
     eprintln!(
         "cargo-teeny: resolving package '{}' for host {host}",
         args.package
@@ -269,10 +309,23 @@ pub fn run(args: InstallToolchainArgs) -> Result<()> {
     };
 
     let tarball_path = staging.join("package.tar");
-    eprintln!("cargo-teeny: downloading {}", target.url);
-    if let Err(e) = download_file(&target.url, &tarball_path) {
-        cleanup(&staging);
-        return Err(e);
+    if let Some(local_dir) = &args.local_dir {
+        let result = local_package_path(local_dir, &manifest_toml, &target.url).and_then(|src| {
+            eprintln!("cargo-teeny: copying {}", src.display());
+            fs::copy(&src, &tarball_path)
+                .with_context(|| format!("copy {} to {}", src.display(), tarball_path.display()))
+                .map(|_| ())
+        });
+        if let Err(e) = result {
+            cleanup(&staging);
+            return Err(e);
+        }
+    } else {
+        eprintln!("cargo-teeny: downloading {}", target.url);
+        if let Err(e) = download_file(&target.url, &tarball_path) {
+            cleanup(&staging);
+            return Err(e);
+        }
     }
 
     eprintln!("cargo-teeny: verifying sha256");
@@ -411,22 +464,43 @@ available = false
         assert!(validate_dist_server("https://cdn.spinorml.com/teenyc/").is_err());
     }
 
+    const HOST: &str = "x86_64-unknown-linux-gnu";
+
     #[test]
     fn validate_toolchain_name_accepts_teenyc() {
-        assert!(validate_toolchain_name("teenyc").is_ok());
+        assert!(validate_toolchain_name("teenyc", HOST).is_ok());
     }
 
     #[test]
-    fn validate_toolchain_name_rejects_standard_channels() {
-        assert!(validate_toolchain_name("stable").is_err());
-        assert!(validate_toolchain_name("beta-i686").is_err());
-        assert!(validate_toolchain_name("nightly-x86_64-unknown-linux-gnu").is_err());
+    fn validate_toolchain_name_accepts_stable_teenyc() {
+        // Not a real collision: "teenyc" isn't a target triple, so this can't shadow a genuine
+        // official `stable-<host>` toolchain.
+        assert!(validate_toolchain_name("stable-teenyc", HOST).is_ok());
+    }
+
+    #[test]
+    fn validate_toolchain_name_rejects_bare_standard_channels() {
+        assert!(validate_toolchain_name("stable", HOST).is_err());
+        assert!(validate_toolchain_name("beta", HOST).is_err());
+        assert!(validate_toolchain_name("nightly", HOST).is_err());
+    }
+
+    #[test]
+    fn validate_toolchain_name_rejects_real_official_names_for_this_host() {
+        assert!(validate_toolchain_name(&format!("stable-{HOST}"), HOST).is_err());
+        assert!(validate_toolchain_name(&format!("nightly-{HOST}"), HOST).is_err());
+    }
+
+    #[test]
+    fn validate_toolchain_name_allows_official_name_for_a_different_host() {
+        // Only collides with *this* host's real toolchain slot.
+        assert!(validate_toolchain_name("stable-aarch64-apple-darwin", HOST).is_ok());
     }
 
     #[test]
     fn validate_toolchain_name_rejects_none_and_slashes() {
-        assert!(validate_toolchain_name("none").is_err());
-        assert!(validate_toolchain_name("foo/bar").is_err());
+        assert!(validate_toolchain_name("none", HOST).is_err());
+        assert!(validate_toolchain_name("foo/bar", HOST).is_err());
     }
 
     #[test]

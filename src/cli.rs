@@ -98,12 +98,20 @@ pub struct BuildArgs {
 #[derive(Parser)]
 pub struct InstallToolchainArgs {
     /// Custom rustup distribution server hosting the channel manifest
-    /// (`<dist-server>/dist/channel-rust-<channel>.toml`).
+    /// (`<dist-server>/dist/channel-rust-<channel>.toml`). Ignored when `--local-dir` is given.
     #[arg(long, default_value = "https://cdn.spinorml.com/teenyc")]
     pub dist_server: String,
 
+    /// Install from a local staging directory instead of `--dist-server` (no network access).
+    /// Must have the same layout the CDN serves: `<local-dir>/dist/channel-rust-<channel>.toml`
+    /// and `<local-dir>/dist/<date>/<tarball>` — i.e. exactly what
+    /// `publish-teenyc-runtime.sh`'s staging dir looks like before it gets scp'd out. Useful for
+    /// testing a freshly built toolchain before (or without) publishing it anywhere.
+    #[arg(long)]
+    pub local_dir: Option<PathBuf>,
+
     /// Channel name (selects which `channel-rust-<channel>.toml` manifest to fetch).
-    #[arg(long, default_value = "teenyc")]
+    #[arg(long, default_value = "stable-teenyc")]
     pub channel: String,
 
     /// Package within that manifest to install (the compiler-only package, no std/cargo).
@@ -111,9 +119,10 @@ pub struct InstallToolchainArgs {
     pub package: String,
 
     /// Name to register the toolchain under with `rustup toolchain link` (defaults to
-    /// `--package`). `rustup toolchain install` can't be used for a custom channel name — it
-    /// only accepts stable/beta/nightly or a bare version number — so this links a locally
-    /// extracted copy instead.
+    /// `<channel>-<host-triple>`, matching the naming convention of a real rustup-managed
+    /// toolchain, e.g. `stable-teenyc-x86_64-unknown-linux-gnu`). `rustup toolchain install`
+    /// can't be used for a custom channel name — it only accepts stable/beta/nightly or a bare
+    /// version number — so this links a locally extracted copy instead.
     #[arg(long)]
     pub name: Option<String>,
 
