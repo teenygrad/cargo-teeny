@@ -1,0 +1,7 @@
+[workspace]
+changelog_update = true
+git_release_enable = true
+git_tag_enable = true
+pr_labels = ["release"]
+repo_url = "https://github.com/teenygrad/cargo-teeny"
+semver_check = true
