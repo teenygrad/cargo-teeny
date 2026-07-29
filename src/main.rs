@@ -1,3 +1,12 @@
+#![warn(missing_docs)]
+
+//! Cargo integration for the teeny cross-compiler toolchain (`cargo teeny …`).
+//!
+//! Provides subcommands for installing the custom `teenyc` rustup toolchain,
+//! cross-compiling and packaging a project for a target board, ahead-of-time
+//! compiling GPU kernels, and deploying the result over SSH. See
+//! [`cli::Command`] for the full subcommand list, or run `cargo teeny --help`.
+
 mod cli;
 mod commands;
 mod profiles;
