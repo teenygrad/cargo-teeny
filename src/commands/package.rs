@@ -181,7 +181,10 @@ mod tests {
     #[test]
     fn built_artifact_path_bin_debug() {
         let p = built_artifact_path("aarch64-unknown-linux-gnu", false, true, "tllm");
-        assert_eq!(p, PathBuf::from("target/aarch64-unknown-linux-gnu/debug/tllm"));
+        assert_eq!(
+            p,
+            PathBuf::from("target/aarch64-unknown-linux-gnu/debug/tllm")
+        );
     }
 
     #[test]

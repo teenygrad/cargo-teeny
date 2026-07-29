@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Cargo commands for the teeny cross-compiler toolchain"
 license-file = "LICENSE"
-repository = "https://github.com/spinorml/cargo-teeny"
+repository = "https://github.com/teenygrad/cargo-teeny"
 readme = "README.md"
 
 [[bin]]
