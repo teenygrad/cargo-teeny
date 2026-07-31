@@ -2,10 +2,13 @@
 name = "cargo-teeny"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Cargo commands for the teeny cross-compiler toolchain"
-license-file = "LICENSE"
+license = "Apache-2.0"
 repository = "https://github.com/teenygrad/cargo-teeny"
 readme = "README.md"
+keywords = ["cross-compile", "sysroot", "cargo-plugin"]
+categories = ["development-tools::cargo-plugins"]
 
 [[bin]]
 name = "cargo-teeny"
