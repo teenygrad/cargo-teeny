@@ -62,13 +62,39 @@ fn validate_toolchain_name(name: &str, host: &str) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug)]
 struct PackageTarget {
     url: String,
     sha256: String,
 }
 
+/// The target triples `package` is `available` for in a parsed channel manifest, sorted.
+fn available_targets(doc: &toml::Value, package: &str) -> Vec<String> {
+    let mut targets: Vec<String> = doc
+        .get("pkg")
+        .and_then(|p| p.get(package))
+        .and_then(|p| p.get("target"))
+        .and_then(|t| t.as_table())
+        .map(|table| {
+            table
+                .iter()
+                .filter(|(_, v)| {
+                    v.get("available")
+                        .and_then(|a| a.as_bool())
+                        .unwrap_or(false)
+                })
+                .map(|(k, _)| k.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    targets.sort();
+    targets
+}
+
 /// Extract the (preferring `.tar.xz`) download URL and sha256 for `package`'s `host` target
-/// out of a channel manifest TOML.
+/// out of a channel manifest TOML. `host` is the OS/arch-derived triple this machine's `rustc`
+/// reports (see `detect_host_triple`); if the manifest has no available build for it, the error
+/// lists which triples it does have, so the caller learns what's actually installable here.
 fn parse_target(manifest_toml: &str, package: &str, host: &str) -> Result<PackageTarget> {
     let doc: toml::Value = manifest_toml
         .parse()
@@ -77,17 +103,25 @@ fn parse_target(manifest_toml: &str, package: &str, host: &str) -> Result<Packag
         .get("pkg")
         .and_then(|p| p.get(package))
         .and_then(|p| p.get("target"))
-        .and_then(|t| t.get(host))
-        .with_context(|| format!("manifest has no pkg.{package}.target.{host} entry"))?;
+        .and_then(|t| t.get(host));
 
     let available = target
-        .get("available")
+        .and_then(|t| t.get("available"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    anyhow::ensure!(
-        available,
-        "package '{package}' is not available for target '{host}' in this channel manifest"
-    );
+    if !available {
+        let choices = available_targets(&doc, package);
+        anyhow::bail!(
+            "package '{package}' is not available for this machine's target '{host}' in this \
+             channel manifest.\navailable targets: {}",
+            if choices.is_empty() {
+                "(none)".to_string()
+            } else {
+                choices.join(", ")
+            }
+        );
+    }
+    let target = target.expect("available implies target lookup above succeeded");
 
     if let (Some(url), Some(hash)) = (
         target.get("xz_url").and_then(|v| v.as_str()),
@@ -428,13 +462,25 @@ available = false
     }
 
     #[test]
-    fn parse_target_rejects_unavailable() {
-        assert!(parse_target(SAMPLE_MANIFEST, "teenyc", "aarch64-apple-darwin").is_err());
+    fn parse_target_rejects_unavailable_and_lists_available_targets() {
+        let err = parse_target(SAMPLE_MANIFEST, "teenyc", "aarch64-apple-darwin").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("not available for this machine's target 'aarch64-apple-darwin'"));
+        assert!(msg.contains("available targets: x86_64-unknown-linux-gnu"));
     }
 
     #[test]
-    fn parse_target_rejects_missing_entry() {
-        assert!(parse_target(SAMPLE_MANIFEST, "cargo", "x86_64-unknown-linux-gnu").is_err());
+    fn parse_target_rejects_missing_entry_and_lists_available_targets() {
+        let err = parse_target(SAMPLE_MANIFEST, "teenyc", "i686-pc-windows-msvc").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("not available for this machine's target 'i686-pc-windows-msvc'"));
+        assert!(msg.contains("available targets: x86_64-unknown-linux-gnu"));
+    }
+
+    #[test]
+    fn parse_target_reports_no_available_targets_when_none_exist() {
+        let err = parse_target(SAMPLE_MANIFEST, "cargo", "x86_64-unknown-linux-gnu").unwrap_err();
+        assert!(err.to_string().contains("available targets: (none)"));
     }
 
     #[test]
