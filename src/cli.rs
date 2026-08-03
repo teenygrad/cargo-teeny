@@ -70,6 +70,12 @@ pub struct BuildArgs {
     #[arg(long, value_enum)]
     pub target: BoardType,
 
+    /// Workspace member to build by package name — lets this be invoked from the
+    /// workspace root instead of the member's own directory. Defaults to whichever
+    /// crate's manifest is nearest above the current directory.
+    #[arg(short = 'p', long)]
+    pub package: Option<String>,
+
     /// Host path to the CUDA aarch64 target directory (overrides the profile default).
     #[arg(long)]
     pub cuda_path: Option<PathBuf>,
@@ -89,6 +95,10 @@ pub struct BuildArgs {
     /// Build a specific binary by name (mutually exclusive with `--example`/`--examples`).
     #[arg(long, conflicts_with_all = ["examples", "example"])]
     pub bin: Option<String>,
+
+    /// Comma-separated cargo features to enable (forwarded to `cross`/`cargo` as `--features`).
+    #[arg(long)]
+    pub features: Option<String>,
 
     /// Extra arguments forwarded verbatim to `cross` after `--`.
     #[arg(last = true)]
@@ -139,6 +149,12 @@ pub struct InstallToolchainArgs {
 
 #[derive(Parser)]
 pub struct AotArgs {
+    /// Workspace member to build by package name — lets this be invoked from the
+    /// workspace root instead of the member's own directory. Defaults to whichever
+    /// crate's manifest is nearest above the current directory.
+    #[arg(short = 'p', long)]
+    pub package: Option<String>,
+
     /// Binary target to build and run (mutually exclusive with `--example`).
     #[arg(long)]
     pub bin: Option<String>,
@@ -150,6 +166,11 @@ pub struct AotArgs {
     /// Build in debug mode (omits `--release`; default is release).
     #[arg(long)]
     pub no_release: bool,
+
+    /// Comma-separated cargo features to enable for the host build (forwarded to `cargo run`
+    /// as `--features`).
+    #[arg(long)]
+    pub features: Option<String>,
 
     /// Target backend to compile for. Forwarded verbatim to the binary —
     /// cargo-teeny never parses this itself.
@@ -175,6 +196,12 @@ pub struct PackageArgs {
     #[arg(long, value_enum)]
     pub target: BoardType,
 
+    /// Workspace member to build by package name — lets this be invoked from the
+    /// workspace root instead of the member's own directory. Defaults to whichever
+    /// crate's manifest is nearest above the current directory.
+    #[arg(short = 'p', long)]
+    pub package: Option<String>,
+
     /// Destination directory for the self-contained package (created if missing).
     /// Populated with bin/, cache/, conf/, data/ subdirectories.
     #[arg(long)]
@@ -191,6 +218,11 @@ pub struct PackageArgs {
     /// Build in debug mode (omits `--release`; default is release).
     #[arg(long)]
     pub no_release: bool,
+
+    /// Comma-separated cargo features to enable, for both the cross-compiled binary and the
+    /// host AOT-compile step (forwarded to both `cross`/`cargo` as `--features`).
+    #[arg(long)]
+    pub features: Option<String>,
 
     /// Host path to the CUDA aarch64 target directory (overrides the profile default).
     #[arg(long)]

@@ -12,6 +12,7 @@
 //! provenance marker is written to `<dest>/conf`. `<dest>/data` is scaffolded
 //! empty — populating it with models/datasets is a separate concern.
 
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,6 +23,7 @@ use crate::cli::{AotArgs, BuildArgs, PackageArgs};
 use crate::commands::aot;
 use crate::commands::build::{self, CrossVerb};
 use crate::profiles::{board_profile, board_type_cli_name};
+use crate::workspace;
 
 const MARKER: &str = ".cargo-teeny-package";
 const MARKER_VERSION: u32 = 1;
@@ -38,10 +40,23 @@ pub fn run(args: PackageArgs) -> Result<()> {
     let is_bin = args.bin.is_some();
     let release = !args.no_release;
 
-    let bin_dir = args.dest.join("bin");
-    let cache_dir = args.dest.join("cache");
-    let conf_dir = args.dest.join("conf");
-    let data_dir = args.dest.join("data");
+    // Canonicalize `--dest` before deriving `cache_dir`: the host AOT-compile step (run via
+    // plain `cargo run`, so it inherits our cwd) hands `--cache-dir` down into the `teenyc`
+    // compiler pipeline, which internally changes its working directory while compiling
+    // kernels — a *relative* cache dir silently breaks once that happens (rustc then fails
+    // to find `.rs` sources it just wrote, under the now-stale relative path), while an
+    // absolute one keeps resolving correctly throughout.
+    fs::create_dir_all(&args.dest)
+        .with_context(|| format!("create {}", args.dest.display()))?;
+    let dest = args
+        .dest
+        .canonicalize()
+        .with_context(|| format!("canonicalize {}", args.dest.display()))?;
+
+    let bin_dir = dest.join("bin");
+    let cache_dir = dest.join("cache");
+    let conf_dir = dest.join("conf");
+    let data_dir = dest.join("data");
     for dir in [&bin_dir, &cache_dir, &conf_dir, &data_dir] {
         fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
     }
@@ -50,8 +65,10 @@ pub fn run(args: PackageArgs) -> Result<()> {
     build::run(
         BuildArgs {
             target: args.target,
+            package: args.package.clone(),
             cuda_path: args.cuda_path.clone(),
             no_release: args.no_release,
+            features: args.features.clone(),
             examples: false,
             example: if is_bin { None } else { Some(name.clone()) },
             bin: if is_bin { Some(name.clone()) } else { None },
@@ -60,8 +77,14 @@ pub fn run(args: PackageArgs) -> Result<()> {
         CrossVerb::Build,
     )?;
 
+    // `cross build` writes into `target/` under the *workspace* root, not necessarily next
+    // to this crate's own manifest (e.g. a demo that's a workspace member) — resolve the same
+    // root `build::run` used.
+    let cwd = env::current_dir().context("get current directory")?;
+    let (_manifest, cross_root, _manifest_rel) = workspace::resolve(&cwd, args.package.as_deref())?;
+
     let profile = board_profile(args.target);
-    let built_path = built_artifact_path(profile.cross_triple, release, is_bin, &name);
+    let built_path = built_artifact_path(&cross_root, profile.cross_triple, release, is_bin, &name);
     let dest_bin = bin_dir.join(&name);
     fs::copy(&built_path, &dest_bin)
         .with_context(|| format!("copy {} -> {}", built_path.display(), dest_bin.display()))?;
@@ -69,9 +92,11 @@ pub fn run(args: PackageArgs) -> Result<()> {
 
     // ── 2. AOT-compile kernels on the host into <dest>/cache ────────────────
     aot::run(AotArgs {
+        package: args.package.clone(),
         bin: args.bin.clone(),
         example: args.example.clone(),
         no_release: args.no_release,
+        features: args.features.clone(),
         device: args.device.clone(),
         options: args.options.clone(),
         cache_dir: Some(cache_dir.clone()),
@@ -85,11 +110,18 @@ pub fn run(args: PackageArgs) -> Result<()> {
     Ok(())
 }
 
-/// Where `cross build` writes the artifact, relative to the crate root
-/// (assumes no custom `CARGO_TARGET_DIR`, matching `build`/`aot`).
-fn built_artifact_path(cross_triple: &str, release: bool, is_bin: bool, name: &str) -> PathBuf {
+/// Where `cross build` writes the artifact, under `root` (the workspace root, i.e. the
+/// directory `build::run` invokes `cross` from — assumes no custom `CARGO_TARGET_DIR`,
+/// matching `build`/`aot`).
+fn built_artifact_path(
+    root: &Path,
+    cross_triple: &str,
+    release: bool,
+    is_bin: bool,
+    name: &str,
+) -> PathBuf {
     let profile_dir = if release { "release" } else { "debug" };
-    let mut p = PathBuf::from("target").join(cross_triple).join(profile_dir);
+    let mut p = root.join("target").join(cross_triple).join(profile_dir);
     if !is_bin {
         p = p.join("examples");
     }
@@ -171,19 +203,21 @@ mod tests {
 
     #[test]
     fn built_artifact_path_example_release() {
-        let p = built_artifact_path("aarch64-unknown-linux-gnu", true, false, "yolo26");
+        let root = Path::new("/repo");
+        let p = built_artifact_path(root, "aarch64-unknown-linux-gnu", true, false, "yolo26");
         assert_eq!(
             p,
-            PathBuf::from("target/aarch64-unknown-linux-gnu/release/examples/yolo26")
+            PathBuf::from("/repo/target/aarch64-unknown-linux-gnu/release/examples/yolo26")
         );
     }
 
     #[test]
     fn built_artifact_path_bin_debug() {
-        let p = built_artifact_path("aarch64-unknown-linux-gnu", false, true, "tllm");
+        let root = Path::new("/repo");
+        let p = built_artifact_path(root, "aarch64-unknown-linux-gnu", false, true, "tllm");
         assert_eq!(
             p,
-            PathBuf::from("target/aarch64-unknown-linux-gnu/debug/tllm")
+            PathBuf::from("/repo/target/aarch64-unknown-linux-gnu/debug/tllm")
         );
     }
 

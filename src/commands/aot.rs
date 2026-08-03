@@ -16,6 +16,10 @@ pub fn run(args: AotArgs) -> Result<()> {
     let mut cmd = process::Command::new("cargo");
     cmd.arg("run");
 
+    if let Some(ref package) = args.package {
+        cmd.args(["-p", package]);
+    }
+
     if !args.no_release {
         cmd.arg("--release");
     }
@@ -31,6 +35,10 @@ pub fn run(args: AotArgs) -> Result<()> {
         (Some(_), Some(_)) => {
             unreachable!("clap enforces --bin/--example are mutually exclusive")
         }
+    }
+
+    if let Some(ref features) = args.features {
+        cmd.args(["--features", features]);
     }
 
     cmd.arg("--");
