@@ -207,9 +207,11 @@ pub struct PackageArgs {
     #[arg(long)]
     pub dest: PathBuf,
 
-    /// Binary target to build and package (mutually exclusive with `--example`).
-    #[arg(long)]
-    pub bin: Option<String>,
+    /// Binary target to build and package. Repeatable — pass `--bin` multiple times to
+    /// bundle several binaries into the same package (they share `cache/`/`conf`/`data`,
+    /// each gets its own file under `bin/`). Mutually exclusive with `--example`.
+    #[arg(long = "bin")]
+    pub bin: Vec<String>,
 
     /// Example target to build and package (mutually exclusive with `--bin`).
     #[arg(long, conflicts_with = "bin")]
