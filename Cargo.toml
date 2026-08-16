@@ -1,11 +1,14 @@
 [package]
 name = "cargo-teeny"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Cargo commands for the teeny cross-compiler toolchain"
 license = "Apache-2.0"
 repository = "https://github.com/teenygrad/cargo-teeny"
+# This README is what docs.teenygrad.org/cargo-teeny publishes, until the crate
+# grows a book/ of its own (see the docs repo's books.config.mjs).
+documentation = "https://docs.teenygrad.org/cargo-teeny"
 readme = "README.md"
 keywords = ["cross-compile", "sysroot", "cargo-plugin"]
 categories = ["development-tools::cargo-plugins"]
