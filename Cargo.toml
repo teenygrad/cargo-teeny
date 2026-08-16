@@ -1,6 +1,6 @@
 [package]
 name = "cargo-teeny"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
 description = "Cargo commands for the teeny cross-compiler toolchain"
