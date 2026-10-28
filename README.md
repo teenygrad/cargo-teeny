@@ -73,7 +73,11 @@ Automatically:
 
 ```bash
 cargo teeny build --target riscv-rvv --example relu
+# a crate whose default features include `cuda`: build only its `riscv` backend
+cargo teeny build --target riscv-rvv --example yolo26 --no-default-features --features riscv
 ```
+
+`--no-default-features` is also accepted by `aot`, `package` and `run`.
 
 ## `cargo teeny sysroot`
 

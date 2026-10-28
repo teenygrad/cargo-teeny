@@ -81,6 +81,9 @@ pub fn run(args: BuildArgs, verb: CrossVerb) -> Result<()> {
     if let Some(ref features) = args.features {
         cmd.args(["--features", features]);
     }
+    if args.no_default_features {
+        cmd.arg("--no-default-features");
+    }
 
     if args.examples {
         cmd.arg("--examples");

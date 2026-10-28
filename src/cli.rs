@@ -109,6 +109,11 @@ pub struct BuildArgs {
     #[arg(long)]
     pub features: Option<String>,
 
+    /// Disable the crate's default features (forwarded as `--no-default-features`) — e.g. to
+    /// build a `riscv` feature without a default `cuda` one.
+    #[arg(long)]
+    pub no_default_features: bool,
+
     /// Extra arguments forwarded verbatim to `cross` after `--`.
     #[arg(last = true)]
     pub extra: Vec<String>,
@@ -181,6 +186,11 @@ pub struct AotArgs {
     #[arg(long)]
     pub features: Option<String>,
 
+    /// Disable the crate's default features (forwarded as `--no-default-features`) — e.g. to
+    /// build a `riscv` feature without a default `cuda` one.
+    #[arg(long)]
+    pub no_default_features: bool,
+
     /// Target backend to compile for. Forwarded verbatim to the binary —
     /// cargo-teeny never parses this itself.
     #[arg(long)]
@@ -234,6 +244,11 @@ pub struct PackageArgs {
     /// host AOT-compile step (forwarded to both `cross`/`cargo` as `--features`).
     #[arg(long)]
     pub features: Option<String>,
+
+    /// Disable the crate's default features (forwarded as `--no-default-features`) — e.g. to
+    /// build a `riscv` feature without a default `cuda` one.
+    #[arg(long)]
+    pub no_default_features: bool,
 
     /// Host path to the CUDA aarch64 target directory (overrides the profile default).
     /// Only valid for boards with CUDA.
@@ -309,6 +324,11 @@ pub struct RunArgs {
     /// Comma-separated cargo features to enable (forwarded to `cross` as `--features`).
     #[arg(long)]
     pub features: Option<String>,
+
+    /// Disable the crate's default features (forwarded as `--no-default-features`) — e.g. to
+    /// build a `riscv` feature without a default `cuda` one.
+    #[arg(long)]
+    pub no_default_features: bool,
 
     /// Target sysroot passed to `qemu-riscv64 -L` (where it finds the RISC-V dynamic linker and
     /// libc), e.g. one created by `cargo teeny sysroot`.

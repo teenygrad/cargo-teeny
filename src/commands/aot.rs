@@ -40,6 +40,9 @@ pub fn run(args: AotArgs) -> Result<()> {
     if let Some(ref features) = args.features {
         cmd.args(["--features", features]);
     }
+    if args.no_default_features {
+        cmd.arg("--no-default-features");
+    }
 
     cmd.arg("--");
     cmd.args(["--device", &args.device]);

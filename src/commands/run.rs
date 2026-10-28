@@ -52,6 +52,7 @@ pub fn run(args: RunArgs) -> Result<()> {
             example: if is_bin { None } else { Some(name.clone()) },
             bin: if is_bin { Some(name.clone()) } else { None },
             features: args.features.clone(),
+            no_default_features: args.no_default_features,
             extra: Vec::new(),
         },
         CrossVerb::Build,
