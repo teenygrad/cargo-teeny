@@ -2,7 +2,21 @@
 
 Cargo commands for the [teenygrad](https://github.com/teenygrad/teenygrad) toolchain: install the
 custom `teenyc` compiler, cross-compile and package a project for a target board, ahead-of-time
-compile its GPU kernels, and deploy the result over SSH.
+compile its GPU or RISC-V vector (RVV) kernels, run RISC-V builds locally under QEMU, and deploy
+the result over SSH.
+
+## Board profiles
+
+`--target` (and `sysroot --type`) select a board profile:
+
+| Profile            | Rust target triple            | Default AOT `--device` / `--options` |
+| ------------------ | ----------------------------- | ------------------------------------ |
+| `jetson-orin-nano` | `aarch64-unknown-linux-gnu`   | `cuda` / `capability=sm_87`          |
+| `riscv-rvv`        | `riscv64gc-unknown-linux-gnu` | `riscv` / `capability=generic-rvv1.0` |
+| `spacemit-k3`      | `riscv64gc-unknown-linux-gnu` | `riscv` / `capability=spacemit-k3`   |
+
+For the RISC-V profiles the host binary is plain RV64GC (no `+v`), so it runs on any RISC-V Linux
+board; only the AOT-compiled kernels use RVV, selected via the `capability` option.
 
 ## Installation
 
@@ -53,8 +67,13 @@ Automatically:
 - Resolves the teenygrad workspace root from the invoking project's `[patch.crates-io]` entries
   and mounts it into the cross container — `cross` only auto-mounts individual crate directories,
   not the workspace root needed for `Cargo.toml` inheritance.
-- Mounts the host's CUDA aarch64 target directory (override with `--cuda-path`) at the path the
-  board's cross image expects.
+- For CUDA boards, mounts the host's CUDA aarch64 target directory (override with `--cuda-path`)
+  at the path the board's cross image expects. RISC-V boards have no CUDA mount, and
+  `--cuda-path` is rejected for them.
+
+```bash
+cargo teeny build --target riscv-rvv --example relu
+```
 
 ## `cargo teeny sysroot`
 
@@ -66,6 +85,15 @@ cargo teeny sysroot --host aarch64-unknown-linux-gnu --path ./sysroot --type jet
 # with an rsync pull from the device afterward:
 cargo teeny sysroot --host aarch64-unknown-linux-gnu --path ./sysroot --type jetson-orin-nano \
   --rsync-from ubuntu@jetson
+```
+
+For the RISC-V profiles, `--rsync-from` mirrors `/usr/include` and `/usr/lib/riscv64-linux-gnu`,
+and `lib/ld-linux-riscv64-lp64d.so.1` is linked to the mirrored dynamic linker so the tree can be
+used directly as `cargo teeny run --sysroot`:
+
+```bash
+cargo teeny sysroot --host riscv64gc-unknown-linux-gnu --path ./sysroot-k3 --type spacemit-k3 \
+  --rsync-from user@k3-board
 ```
 
 A marker file (`.cargo-teeny-sysroot`) is written recording the version, host triple, type, and
@@ -98,7 +126,14 @@ cargo teeny package \
   --options "capability=sm_87,ptx-version=82"
 ```
 
-Produces:
+`--device`/`--options` default to the board profile (see [Board profiles](#board-profiles)), so for
+a RISC-V board this is just:
+
+```bash
+cargo teeny package --target spacemit-k3 --example relu --dest ./dist/relu-k3
+```
+
+Passing a `--device` other than the profile's drops the default `--options`. Produces:
 
 ```text
 dist/yolo26-orin/
@@ -107,6 +142,21 @@ dist/yolo26-orin/
   conf/      # provenance marker (target/device/options/commit/build time)
   data/      # empty -- populate with models/datasets separately
 ```
+
+## `cargo teeny run`
+
+Cross-compiles a binary/example for a RISC-V board (delegating to `build`) and runs it locally
+under `qemu-riscv64 -cpu max` user-mode emulation (`max` enables the V extension). Arguments after
+`--` go to the binary; its exit code is propagated.
+
+```bash
+cargo teeny run --target riscv-rvv --example relu -- --some-flag
+cargo teeny run --target spacemit-k3 --bin demo --sysroot ./sysroot-k3
+```
+
+`--sysroot` (passed as `qemu-riscv64 -L`) defaults to `/usr/riscv64-linux-gnu`, the Debian/Ubuntu
+cross libc (`apt install qemu-user libc6-dev-riscv64-cross`). Use a sysroot from `cargo teeny
+sysroot --rsync-from` to run against the board's own libraries.
 
 ## `cargo teeny deploy`
 

@@ -118,7 +118,8 @@ pub fn find_member_manifest(root: &Path, package: &str) -> Result<PathBuf> {
 }
 
 fn read_toml(path: &Path) -> Result<toml::Value> {
-    let content = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     content
         .parse()
         .with_context(|| format!("parse TOML in {}", path.display()))

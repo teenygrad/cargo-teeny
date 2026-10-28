@@ -36,7 +36,50 @@ pub fn sysroot_rsync_folders(kind: BoardType) -> &'static [SysrootRsyncFolder] {
                 remote_path: "/usr/lib/aarch64-linux-gnu",
             },
         ],
+        BoardType::RiscvRvv | BoardType::SpacemitK3 => &[
+            SysrootRsyncFolder {
+                remote_path: "/usr/include",
+            },
+            SysrootRsyncFolder {
+                remote_path: "/usr/lib/riscv64-linux-gnu",
+            },
+        ],
     }
+}
+
+/// Symlinks created in the sysroot as `(link, target)`, both relative to the sysroot root.
+///
+/// Merged-`/usr` distros make `/lib` a symlink to `usr/lib`, but the scaffold creates `lib/` as a
+/// real directory — so the dynamic linker the binary's `PT_INTERP` names has to be linked in
+/// explicitly for `qemu-riscv64 -L <sysroot>` (`cargo teeny run`) to find it.
+pub fn sysroot_links(kind: BoardType) -> &'static [(&'static str, &'static str)] {
+    match kind {
+        BoardType::JetsonOrinNano => &[],
+        BoardType::RiscvRvv | BoardType::SpacemitK3 => &[(
+            "lib/ld-linux-riscv64-lp64d.so.1",
+            "../usr/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1",
+        )],
+    }
+}
+
+#[cfg(unix)]
+fn create_links(root: &Path, kind: BoardType) -> Result<()> {
+    for (link, target) in sysroot_links(kind) {
+        let link = root.join(link);
+        // `symlink_metadata` (not `exists`) so a dangling link from an earlier run — the loader
+        // only appears once `--rsync-from` has populated `usr/lib` — is replaced, not duplicated.
+        if link.symlink_metadata().is_ok() {
+            fs::remove_file(&link).with_context(|| format!("remove {}", link.display()))?;
+        }
+        std::os::unix::fs::symlink(target, &link)
+            .with_context(|| format!("symlink {} -> {target}", link.display()))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_links(_root: &Path, _kind: BoardType) -> Result<()> {
+    Ok(())
 }
 
 /// Standard directories created under the sysroot root (before host-specific paths).
@@ -179,6 +222,8 @@ pub fn run(args: SysrootArgs) -> Result<()> {
         run_rsyncs(&args, root)?;
     }
 
+    create_links(root, args.sysroot_type)?;
+
     let marker_path = root.join(MARKER);
     let mut marker = fs::OpenOptions::new()
         .create(true)
@@ -240,6 +285,46 @@ mod tests {
         assert!(marker.starts_with(&format!("{MARKER_VERSION}\n")));
         assert!(marker.contains("HOST=aarch64-unknown-linux-gnu"));
         assert!(marker.contains("TYPE=jetson-orin-nano"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn riscv_rsync_folders() {
+        for kind in [BoardType::RiscvRvv, BoardType::SpacemitK3] {
+            let paths: Vec<_> = sysroot_rsync_folders(kind)
+                .iter()
+                .map(|f| f.remote_path)
+                .collect();
+            assert_eq!(paths, vec!["/usr/include", "/usr/lib/riscv64-linux-gnu"]);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn riscv_tree_links_dynamic_linker() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp = std::env::temp_dir().join(format!("cargo-teeny-sysroot-riscv-test-{suffix}"));
+        let _ = fs::remove_dir_all(&tmp);
+        let args = || SysrootArgs {
+            host: "riscv64gc-unknown-linux-gnu".into(),
+            path: tmp.clone(),
+            sysroot_type: BoardType::RiscvRvv,
+            rsync_from: None,
+            rsync_ssh: "ssh".into(),
+        };
+        run(args()).unwrap();
+        // Re-running over an existing tree must replace the link, not fail on it.
+        run(args()).unwrap();
+        let link = tmp.join("lib/ld-linux-riscv64-lp64d.so.1");
+        assert_eq!(
+            fs::read_link(&link).unwrap(),
+            PathBuf::from("../usr/lib/riscv64-linux-gnu/ld-linux-riscv64-lp64d.so.1")
+        );
+        let marker = fs::read_to_string(tmp.join(MARKER)).unwrap();
+        assert!(marker.contains("TYPE=riscv-rvv"));
         let _ = fs::remove_dir_all(&tmp);
     }
 }

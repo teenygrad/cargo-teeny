@@ -31,13 +31,21 @@ pub enum Command {
     Package(PackageArgs),
     /// Push a package directory (from `package`) to a remote host over rsync/ssh.
     Deploy(DeployArgs),
+    /// Cross-compile a binary/example for a RISC-V board and run it locally under
+    /// `qemu-riscv64` user-mode emulation.
+    Run(RunArgs),
 }
 
 /// Board or environment profile shared by sysroot and build commands.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 #[clap(rename_all = "kebab-case")]
 pub enum BoardType {
+    /// NVIDIA Jetson Orin Nano (aarch64 + CUDA).
     JetsonOrinNano,
+    /// Generic RISC-V board with the RVV 1.0 vector extension (riscv64gc host binary).
+    RiscvRvv,
+    /// SpacemiT K3-based RISC-V board (riscv64gc host binary, K3-tuned RVV kernels).
+    SpacemitK3,
 }
 
 #[derive(Parser)]
@@ -77,6 +85,7 @@ pub struct BuildArgs {
     pub package: Option<String>,
 
     /// Host path to the CUDA aarch64 target directory (overrides the profile default).
+    /// Only valid for boards with CUDA.
     #[arg(long)]
     pub cuda_path: Option<PathBuf>,
 
@@ -227,16 +236,19 @@ pub struct PackageArgs {
     pub features: Option<String>,
 
     /// Host path to the CUDA aarch64 target directory (overrides the profile default).
+    /// Only valid for boards with CUDA.
     #[arg(long)]
     pub cuda_path: Option<PathBuf>,
 
-    /// Target backend to AOT-compile kernels for (e.g. `cuda`). Forwarded verbatim to
-    /// the host-run AOT compile step — cargo-teeny never parses this itself.
+    /// Target backend to AOT-compile kernels for (e.g. `cuda`, `riscv`). Forwarded verbatim
+    /// to the host-run AOT compile step — cargo-teeny never parses this itself. Defaults to
+    /// the board profile's backend.
     #[arg(long)]
-    pub device: String,
+    pub device: Option<String>,
 
     /// Backend-specific compiler options (e.g. `"capability=sm_87"` for Jetson Orin
-    /// Nano). Forwarded verbatim.
+    /// Nano). Forwarded verbatim. Defaults to the board profile's options when `--device` is
+    /// the board's default backend.
     #[arg(long)]
     pub options: Option<String>,
 
@@ -268,4 +280,46 @@ pub struct DeployArgs {
     /// untouched and only copy files that aren't there yet).
     #[arg(long)]
     pub overwrite: bool,
+}
+
+#[derive(Parser)]
+pub struct RunArgs {
+    /// Board profile — must be a RISC-V board (controls the target triple and QEMU CPU model).
+    #[arg(long, value_enum)]
+    pub target: BoardType,
+
+    /// Workspace member to build by package name — lets this be invoked from the
+    /// workspace root instead of the member's own directory. Defaults to whichever
+    /// crate's manifest is nearest above the current directory.
+    #[arg(short = 'p', long)]
+    pub package: Option<String>,
+
+    /// Binary target to build and run (mutually exclusive with `--example`).
+    #[arg(long)]
+    pub bin: Option<String>,
+
+    /// Example target to build and run (mutually exclusive with `--bin`).
+    #[arg(long, conflicts_with = "bin")]
+    pub example: Option<String>,
+
+    /// Build in debug mode (omits `--release`; default is release).
+    #[arg(long)]
+    pub no_release: bool,
+
+    /// Comma-separated cargo features to enable (forwarded to `cross` as `--features`).
+    #[arg(long)]
+    pub features: Option<String>,
+
+    /// Target sysroot passed to `qemu-riscv64 -L` (where it finds the RISC-V dynamic linker and
+    /// libc), e.g. one created by `cargo teeny sysroot`.
+    #[arg(long, default_value = "/usr/riscv64-linux-gnu")]
+    pub sysroot: PathBuf,
+
+    /// QEMU user-mode emulator to run the binary with.
+    #[arg(long, default_value = "qemu-riscv64")]
+    pub qemu: String,
+
+    /// Arguments passed to the binary after `--`.
+    #[arg(last = true)]
+    pub args: Vec<String>,
 }
