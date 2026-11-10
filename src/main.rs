@@ -4,7 +4,8 @@
 //!
 //! Provides subcommands for installing the custom `teenyc` rustup toolchain,
 //! cross-compiling and packaging a project for a target board, ahead-of-time
-//! compiling GPU kernels, and deploying the result over SSH. See
+//! compiling GPU/RISC-V kernels, running RISC-V builds under QEMU, and
+//! deploying the result over SSH. See
 //! [`cli::Command`] for the full subcommand list, or run `cargo teeny --help`.
 
 mod cli;
@@ -37,5 +38,6 @@ fn main() -> Result<()> {
         cli::Command::Aot(args) => commands::aot::run(args),
         cli::Command::Package(args) => commands::package::run(args),
         cli::Command::Deploy(args) => commands::deploy::run(args),
+        cli::Command::Run(args) => commands::run::run(args),
     }
 }

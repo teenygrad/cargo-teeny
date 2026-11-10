@@ -14,14 +14,14 @@
 
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 
 use crate::cli::{AotArgs, BuildArgs, PackageArgs};
 use crate::commands::aot;
-use crate::commands::build::{self, CrossVerb};
+use crate::commands::build::{self, CrossVerb, built_artifact_path};
 use crate::profiles::{board_profile, board_type_cli_name};
 use crate::workspace;
 
@@ -40,6 +40,13 @@ pub fn run(args: PackageArgs) -> Result<()> {
     };
     let is_bin = !args.bin.is_empty();
     let release = !args.no_release;
+    let profile = board_profile(args.target);
+    let (device, options) = aot_device_options(
+        profile.device,
+        profile.options,
+        args.device.as_deref(),
+        args.options.as_deref(),
+    );
 
     // Canonicalize `--dest` before deriving `cache_dir`: the host AOT-compile step (run via
     // plain `cargo run`, so it inherits our cwd) hands `--cache-dir` down into the `teenyc`
@@ -47,8 +54,7 @@ pub fn run(args: PackageArgs) -> Result<()> {
     // kernels — a *relative* cache dir silently breaks once that happens (rustc then fails
     // to find `.rs` sources it just wrote, under the now-stale relative path), while an
     // absolute one keeps resolving correctly throughout.
-    fs::create_dir_all(&args.dest)
-        .with_context(|| format!("create {}", args.dest.display()))?;
+    fs::create_dir_all(&args.dest).with_context(|| format!("create {}", args.dest.display()))?;
     let dest = args
         .dest
         .canonicalize()
@@ -67,7 +73,6 @@ pub fn run(args: PackageArgs) -> Result<()> {
     // root `build::run` used. Same root for every name in `names`, so resolve once.
     let cwd = env::current_dir().context("get current directory")?;
     let (_manifest, cross_root, _manifest_rel) = workspace::resolve(&cwd, args.package.as_deref())?;
-    let profile = board_profile(args.target);
 
     for name in &names {
         // ── 1. Cross-compile the deployment binary ──────────────────────────
@@ -78,6 +83,7 @@ pub fn run(args: PackageArgs) -> Result<()> {
                 cuda_path: args.cuda_path.clone(),
                 no_release: args.no_release,
                 features: args.features.clone(),
+                no_default_features: args.no_default_features,
                 examples: false,
                 example: if is_bin { None } else { Some(name.clone()) },
                 bin: if is_bin { Some(name.clone()) } else { None },
@@ -100,36 +106,26 @@ pub fn run(args: PackageArgs) -> Result<()> {
             example: if is_bin { None } else { Some(name.clone()) },
             no_release: args.no_release,
             features: args.features.clone(),
-            device: args.device.clone(),
-            options: args.options.clone(),
+            no_default_features: args.no_default_features,
+            device: device.clone(),
+            options: options.clone(),
             cache_dir: Some(cache_dir.clone()),
             force: args.force,
         })?;
     }
 
     // ── 3. Provenance marker ─────────────────────────────────────────────────
-    write_marker(&conf_dir, &args, is_bin, &names)?;
+    write_marker(
+        &conf_dir,
+        &args,
+        is_bin,
+        &names,
+        &device,
+        options.as_deref(),
+    )?;
 
     eprintln!("cargo-teeny: package assembled at {}", args.dest.display());
     Ok(())
-}
-
-/// Where `cross build` writes the artifact, under `root` (the workspace root, i.e. the
-/// directory `build::run` invokes `cross` from — assumes no custom `CARGO_TARGET_DIR`,
-/// matching `build`/`aot`).
-fn built_artifact_path(
-    root: &Path,
-    cross_triple: &str,
-    release: bool,
-    is_bin: bool,
-    name: &str,
-) -> PathBuf {
-    let profile_dir = if release { "release" } else { "debug" };
-    let mut p = root.join("target").join(cross_triple).join(profile_dir);
-    if !is_bin {
-        p = p.join("examples");
-    }
-    p.join(name)
 }
 
 #[cfg(unix)]
@@ -147,7 +143,32 @@ fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_marker(conf_dir: &Path, args: &PackageArgs, is_bin: bool, names: &[String]) -> Result<()> {
+/// Resolves the AOT `--device`/`--options`: explicit values win; otherwise the board profile's
+/// defaults. The profile's options only apply to its own device — an explicitly different
+/// `--device` gets no default options, since they wouldn't parse for another backend.
+fn aot_device_options(
+    profile_device: &str,
+    profile_options: &str,
+    device: Option<&str>,
+    options: Option<&str>,
+) -> (String, Option<String>) {
+    let device = device.unwrap_or(profile_device);
+    let options = match options {
+        Some(options) => Some(options),
+        None if device == profile_device => Some(profile_options),
+        None => None,
+    };
+    (device.to_owned(), options.map(str::to_owned))
+}
+
+fn write_marker(
+    conf_dir: &Path,
+    args: &PackageArgs,
+    is_bin: bool,
+    names: &[String],
+    device: &str,
+    options: Option<&str>,
+) -> Result<()> {
     let kind = if is_bin { "BIN" } else { "EXAMPLE" };
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -160,8 +181,8 @@ fn write_marker(conf_dir: &Path, args: &PackageArgs, is_bin: bool, names: &[Stri
         &board_type_cli_name(args.target),
         kind,
         &names_joined,
-        &args.device,
-        args.options.as_deref().unwrap_or(""),
+        device,
+        options.unwrap_or(""),
         ts,
         &commit,
     );
@@ -207,26 +228,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn built_artifact_path_example_release() {
-        let root = Path::new("/repo");
-        let p = built_artifact_path(root, "aarch64-unknown-linux-gnu", true, false, "yolo26");
-        assert_eq!(
-            p,
-            PathBuf::from("/repo/target/aarch64-unknown-linux-gnu/release/examples/yolo26")
-        );
-    }
-
-    #[test]
-    fn built_artifact_path_bin_debug() {
-        let root = Path::new("/repo");
-        let p = built_artifact_path(root, "aarch64-unknown-linux-gnu", false, true, "tllm");
-        assert_eq!(
-            p,
-            PathBuf::from("/repo/target/aarch64-unknown-linux-gnu/debug/tllm")
-        );
-    }
-
-    #[test]
     fn marker_body_contains_expected_fields() {
         let body = marker_body(
             "jetson-orin-nano",
@@ -244,5 +245,27 @@ mod tests {
         assert!(body.contains("OPTIONS=capability=sm_87"));
         assert!(body.contains("BUILD_UNIX_TIME=1700000000"));
         assert!(body.contains("SOURCE_COMMIT=deadbeef"));
+    }
+
+    #[test]
+    fn aot_device_options_default_from_profile() {
+        let (device, options) = aot_device_options("riscv", "capability=spacemit-k3", None, None);
+        assert_eq!(device, "riscv");
+        assert_eq!(options.as_deref(), Some("capability=spacemit-k3"));
+    }
+
+    #[test]
+    fn aot_device_options_explicit_options_win() {
+        let (device, options) =
+            aot_device_options("cuda", "capability=sm_87", None, Some("capability=sm_90"));
+        assert_eq!(device, "cuda");
+        assert_eq!(options.as_deref(), Some("capability=sm_90"));
+    }
+
+    #[test]
+    fn aot_device_options_other_device_gets_no_default_options() {
+        let (device, options) = aot_device_options("cuda", "capability=sm_87", Some("riscv"), None);
+        assert_eq!(device, "riscv");
+        assert_eq!(options, None);
     }
 }

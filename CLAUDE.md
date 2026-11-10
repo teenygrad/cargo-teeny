@@ -34,7 +34,11 @@ This is a Cargo plugin binary (`cargo-teeny`) with a two-layer structure:
 Scaffolds an FHS-style directory tree for a cross-compilation sysroot and optionally mirrors remote directories into it via `rsync`.
 
 Key design points:
-- Board/environment profiles are a `SysrootType` enum in `cli.rs` (`ValueEnum`). Each variant maps to a fixed list of `SysrootRsyncFolder` entries in `sysroot_rsync_folders()`.
+- Board/environment profiles are a `BoardType` enum in `cli.rs` (`ValueEnum`). Each variant maps to a fixed list of `SysrootRsyncFolder` entries in `sysroot_rsync_folders()`.
 - A marker file (`.cargo-teeny-sysroot`) is written to the sysroot root with version, host triple, type, and (if applicable) rsync metadata. Bump `MARKER_VERSION` whenever the marker format changes.
 - `rsync` is invoked as a subprocess with `-a -e <rsync_ssh>`. The trailing slash on the source path means "sync contents, not the directory itself."
-- To add a new board profile: add a `SysrootType` variant and a match arm in `sysroot_rsync_folders()`.
+- To add a new board profile: add a `BoardType` variant, a `BoardProfile` in `profiles.rs` (triple, optional CUDA mount, default AOT device/options, optional QEMU CPU), and match arms in `sysroot_rsync_folders()` and `sysroot_links()`.
+
+### Run command (`src/commands/run.rs`)
+
+RISC-V only (boards whose profile has `qemu_cpu`): cross-builds via `build::run`, then runs the artifact with `qemu-riscv64 -cpu <qemu_cpu> -L <sysroot>`.
