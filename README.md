@@ -70,6 +70,9 @@ Automatically:
 - For CUDA boards, mounts the host's CUDA aarch64 target directory (override with `--cuda-path`)
   at the path the board's cross image expects. RISC-V boards have no CUDA mount, and
   `--cuda-path` is rejected for them.
+- Builds into `target/cross/` (artifacts in `target/cross/<triple>/<profile>/`), apart from
+  native builds' `target/`. Build scripts run inside the cross container, and in a shared
+  `target/` cargo would reuse ones last built natively, linked against the host's newer glibc.
 
 ```bash
 cargo teeny build --target riscv-rvv --example relu
