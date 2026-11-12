@@ -40,7 +40,7 @@ pub fn run(args: BuildArgs, verb: CrossVerb) -> Result<()> {
     let teenygrad = workspace::teenygrad_mount(&cross_root.join("Cargo.toml"))?;
 
     let profile = board_profile(args.target);
-    let cuda = match (&profile.cuda, args.cuda_path) {
+    let cuda = match (&profile.cuda, args.cuda_path.clone()) {
         (Some(cuda), path) => Some((
             path.unwrap_or_else(|| PathBuf::from(cuda.host_path)),
             cuda.container_path,
@@ -68,36 +68,16 @@ pub fn run(args: BuildArgs, verb: CrossVerb) -> Result<()> {
     .collect::<Vec<_>>()
     .join(" ");
 
+    let target_dir = cross_target_dir(&cross_root);
     let mut cmd = process::Command::new("cross");
     cmd.current_dir(&cross_root);
-    cmd.arg(verb.as_str());
-    cmd.args(["--manifest-path", &manifest_arg.display().to_string()]);
-    cmd.args(["--target", profile.cross_triple]);
-
-    if !args.no_release {
-        cmd.arg("--release");
-    }
-
-    if let Some(ref features) = args.features {
-        cmd.args(["--features", features]);
-    }
-    if args.no_default_features {
-        cmd.arg("--no-default-features");
-    }
-
-    if args.examples {
-        cmd.arg("--examples");
-    } else if let Some(ref name) = args.example {
-        cmd.args(["--example", name]);
-    } else if let Some(ref name) = args.bin {
-        cmd.args(["--bin", name]);
-    }
-
-    if !args.extra.is_empty() {
-        cmd.arg("--");
-        cmd.args(&args.extra);
-    }
-
+    cmd.args(cross_args(
+        verb,
+        &manifest_arg,
+        profile.cross_triple,
+        &target_dir,
+        &args,
+    ));
     cmd.env("CROSS_CONTAINER_OPTS", &merged_opts);
 
     match &teenygrad {
@@ -109,6 +89,7 @@ pub fn run(args: BuildArgs, verb: CrossVerb) -> Result<()> {
         cross_root.display(),
         manifest_arg.display()
     );
+    eprintln!("cargo-teeny: target dir      {}", target_dir.display());
     eprintln!("cargo-teeny: CROSS_CONTAINER_OPTS={merged_opts}");
 
     let status = cmd.status().context("spawn `cross`")?;
@@ -120,8 +101,57 @@ pub fn run(args: BuildArgs, verb: CrossVerb) -> Result<()> {
     Ok(())
 }
 
+/// The target dir for cross builds of the workspace at `root`: `target/cross`, apart from native
+/// builds' `target/`. Build scripts always run on the build machine, which for a cross build is
+/// the container, but cargo keeps them under the target dir's own `release/build/` with the same
+/// hashes a native build uses. In a shared `target/`, a build script last built natively (linked
+/// against the host's newer glibc) is reused in the container and fails there.
+pub fn cross_target_dir(root: &Path) -> PathBuf {
+    root.join("target").join("cross")
+}
+
+/// `cross` arguments for `verb`ing `manifest_arg` for `triple` into `target_dir`.
+fn cross_args(
+    verb: CrossVerb,
+    manifest_arg: &Path,
+    triple: &str,
+    target_dir: &Path,
+    args: &BuildArgs,
+) -> Vec<String> {
+    let mut out: Vec<String> = vec![
+        verb.as_str().into(),
+        "--manifest-path".into(),
+        manifest_arg.display().to_string(),
+        "--target".into(),
+        triple.into(),
+        "--target-dir".into(),
+        target_dir.display().to_string(),
+    ];
+    if !args.no_release {
+        out.push("--release".into());
+    }
+    if let Some(features) = &args.features {
+        out.extend(["--features".into(), features.clone()]);
+    }
+    if args.no_default_features {
+        out.push("--no-default-features".into());
+    }
+    if args.examples {
+        out.push("--examples".into());
+    } else if let Some(name) = &args.example {
+        out.extend(["--example".into(), name.clone()]);
+    } else if let Some(name) = &args.bin {
+        out.extend(["--bin".into(), name.clone()]);
+    }
+    if !args.extra.is_empty() {
+        out.push("--".into());
+        out.extend(args.extra.iter().cloned());
+    }
+    out
+}
+
 /// Where `cross build` writes the artifact, under `root` (the workspace root, i.e. the
-/// directory `run` invokes `cross` from — assumes no custom `CARGO_TARGET_DIR`).
+/// directory `run` invokes `cross` from), in [`cross_target_dir`].
 pub fn built_artifact_path(
     root: &Path,
     cross_triple: &str,
@@ -130,7 +160,7 @@ pub fn built_artifact_path(
     name: &str,
 ) -> PathBuf {
     let profile_dir = if release { "release" } else { "debug" };
-    let mut p = root.join("target").join(cross_triple).join(profile_dir);
+    let mut p = cross_target_dir(root).join(cross_triple).join(profile_dir);
     if !is_bin {
         p = p.join("examples");
     }
@@ -153,6 +183,7 @@ fn build_container_opts(teenygrad: Option<&Path>, cuda: Option<(&Path, &str)>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::BoardType;
 
     #[test]
     fn container_opts_format() {
@@ -203,7 +234,7 @@ mod tests {
         let p = built_artifact_path(root, "aarch64-unknown-linux-gnu", true, false, "yolo26");
         assert_eq!(
             p,
-            PathBuf::from("/repo/target/aarch64-unknown-linux-gnu/release/examples/yolo26")
+            PathBuf::from("/repo/target/cross/aarch64-unknown-linux-gnu/release/examples/yolo26")
         );
     }
 
@@ -213,7 +244,75 @@ mod tests {
         let p = built_artifact_path(root, "riscv64gc-unknown-linux-gnu", false, true, "tllm");
         assert_eq!(
             p,
-            PathBuf::from("/repo/target/riscv64gc-unknown-linux-gnu/debug/tllm")
+            PathBuf::from("/repo/target/cross/riscv64gc-unknown-linux-gnu/debug/tllm")
+        );
+    }
+
+    fn build_args(target: BoardType) -> BuildArgs {
+        BuildArgs {
+            target,
+            package: None,
+            cuda_path: None,
+            no_release: false,
+            examples: false,
+            example: None,
+            bin: Some("parking-garage-server".into()),
+            features: Some("riscv".into()),
+            no_default_features: true,
+            extra: Vec::new(),
+        }
+    }
+
+    // A cross build's build scripts run inside the container, but cargo keeps them under the
+    // target dir's host `release/build/` with the same hashes a native build of the crate uses.
+    // Sharing `target/` with native builds therefore runs host-linked build scripts against the
+    // container's older glibc ("GLIBC_2.28 not found"), so cross builds get a target dir of
+    // their own.
+    #[test]
+    fn cross_builds_use_a_target_dir_of_their_own() {
+        let root = Path::new("/repo");
+        assert_eq!(cross_target_dir(root), PathBuf::from("/repo/target/cross"));
+        let args = cross_args(
+            CrossVerb::Build,
+            Path::new("demos/parking_garage/Cargo.toml"),
+            "riscv64gc-unknown-linux-gnu",
+            &cross_target_dir(root),
+            &build_args(BoardType::SpacemitK3),
+        );
+        let target_dir = args.iter().position(|a| a == "--target-dir");
+        assert_eq!(
+            target_dir.map(|i| args[i + 1].as_str()),
+            Some("/repo/target/cross"),
+            "{args:?}"
+        );
+    }
+
+    #[test]
+    fn cross_args_forward_the_build_options() {
+        let args = cross_args(
+            CrossVerb::Build,
+            Path::new("demos/parking_garage/Cargo.toml"),
+            "riscv64gc-unknown-linux-gnu",
+            Path::new("/repo/target/cross"),
+            &build_args(BoardType::SpacemitK3),
+        );
+        assert_eq!(
+            args,
+            [
+                "build",
+                "--manifest-path",
+                "demos/parking_garage/Cargo.toml",
+                "--target",
+                "riscv64gc-unknown-linux-gnu",
+                "--target-dir",
+                "/repo/target/cross",
+                "--release",
+                "--features",
+                "riscv",
+                "--no-default-features",
+                "--bin",
+                "parking-garage-server",
+            ]
         );
     }
 }
