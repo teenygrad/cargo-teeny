@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/teenygrad/cargo-teeny/compare/v0.1.3...v0.1.4) - 2026-11-12
+
+### Fixed
+
+- give cross builds a target dir of their own ([#7](https://github.com/teenygrad/cargo-teeny/pull/7))
+
 ## [0.1.3](https://github.com/teenygrad/cargo-teeny/compare/v0.1.2...v0.1.3) - 2026-11-10
 
 ### Added
