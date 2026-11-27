@@ -1,6 +1,6 @@
 [package]
 name = "cargo-teeny"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 rust-version = "1.85"
 description = "Cargo commands for the teeny cross-compiler toolchain"
@@ -20,4 +20,5 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+glob = "0.3"
 toml = "0.8"

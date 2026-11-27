@@ -84,8 +84,8 @@ pub fn require_workspace_root(dir: &Path) -> Result<()> {
 /// Find a workspace member's manifest by its `[package].name`, within the workspace rooted
 /// at `root` (already confirmed via [`require_workspace_root`]).
 ///
-/// Checks the root package's own name, then each literal `[workspace.members]` entry — no
-/// glob support, since this project only ever lists members as literal paths.
+/// Checks the root package's own name, then each `[workspace.members]` entry (see
+/// [`member_manifests`]).
 pub fn find_member_manifest(root: &Path, package: &str) -> Result<PathBuf> {
     let root_manifest = root.join("Cargo.toml");
 
@@ -94,27 +94,63 @@ pub fn find_member_manifest(root: &Path, package: &str) -> Result<PathBuf> {
         return Ok(root_manifest);
     }
 
-    let members = root_doc
-        .get("workspace")
-        .and_then(|w| w.get("members"))
-        .and_then(|m| m.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    for member in members.iter().filter_map(|m| m.as_str()) {
-        let manifest = root.join(member).join("Cargo.toml");
-        let Ok(doc) = read_toml(&manifest) else {
+    let members = member_manifests(root, &root_doc)?;
+    for manifest in &members {
+        let Ok(doc) = read_toml(manifest) else {
             continue;
         };
         if package_name(&doc) == Some(package) {
-            return Ok(manifest);
+            return Ok(manifest.clone());
         }
     }
 
     anyhow::bail!(
-        "no workspace member named `{package}` found under {}",
-        root.display()
+        "no workspace member named `{package}` found under {} ({} members searched)",
+        root.display(),
+        members.len()
     )
+}
+
+/// The manifests of the workspace's members: each `[workspace.members]` entry under `root`,
+/// with globs expanded as cargo expands them (`apps/*`), less the directories
+/// `[workspace.exclude]` names. Entries that match no directory with a `Cargo.toml` are
+/// skipped.
+fn member_manifests(root: &Path, root_doc: &toml::Value) -> Result<Vec<PathBuf>> {
+    let workspace = root_doc.get("workspace");
+    let entries = |key: &str| -> Vec<String> {
+        workspace
+            .and_then(|w| w.get(key))
+            .and_then(|m| m.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|m| m.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let excluded: Vec<PathBuf> = entries("exclude")
+        .iter()
+        .map(|e| normalize(root.join(e)))
+        .collect();
+
+    let mut manifests = Vec::new();
+    for member in entries("members") {
+        let pattern = root.join(&member);
+        let pattern = pattern.to_string_lossy();
+        let dirs = glob::glob(&pattern)
+            .with_context(|| format!("[workspace.members] entry {member:?} is not a valid glob"))?;
+        for dir in dirs {
+            let dir = normalize(dir.with_context(|| format!("expand {member:?}"))?);
+            let manifest = dir.join("Cargo.toml");
+            if manifest.is_file()
+                && !excluded.iter().any(|e| dir.starts_with(e))
+                && !manifests.contains(&manifest)
+            {
+                manifests.push(manifest);
+            }
+        }
+    }
+    Ok(manifests)
 }
 
 fn read_toml(path: &Path) -> Result<toml::Value> {
@@ -319,6 +355,50 @@ teeny-core = { path = "../teenygrad-does-not-exist/core/teeny-core" }
         let root = make_fake_workspace("cargo-teeny-ws-root-test");
         let manifest = find_member_manifest(&root, "root-pkg").unwrap();
         assert_eq!(manifest, root.join("Cargo.toml"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Writes a member crate called `name` at `root/dir`.
+    fn write_member(root: &Path, dir: &str, name: &str) {
+        let member = root.join(dir);
+        fs::create_dir_all(&member).unwrap();
+        fs::write(
+            member.join("Cargo.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn find_member_manifest_expands_glob_members_and_honours_exclude() {
+        // Laid out like teenygrad: every member listed by a glob.
+        let root = std::env::temp_dir().join("cargo-teeny-ws-glob-test");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Cross.toml"), "[build]\n").unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"apps/*\", \"core/*\"]\nexclude = [\"apps/old\"]\n",
+        )
+        .unwrap();
+        write_member(&root, "apps/teeny-llm", "teeny-llm");
+        write_member(&root, "apps/old", "old-app");
+        write_member(&root, "core/teeny-core", "teeny-core");
+        // A directory without a manifest matches the glob and is skipped.
+        fs::create_dir_all(root.join("apps/assets")).unwrap();
+
+        assert_eq!(
+            find_member_manifest(&root, "teeny-llm").unwrap(),
+            root.join("apps/teeny-llm/Cargo.toml")
+        );
+        assert_eq!(
+            find_member_manifest(&root, "teeny-core").unwrap(),
+            root.join("core/teeny-core/Cargo.toml")
+        );
+        let excluded = find_member_manifest(&root, "old-app")
+            .unwrap_err()
+            .to_string();
+        assert!(excluded.contains("2 members searched"), "{excluded}");
         let _ = fs::remove_dir_all(&root);
     }
 
